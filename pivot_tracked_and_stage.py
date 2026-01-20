@@ -70,16 +70,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser):
-    required = {
-        "tracked_input": args.tracked_input,
-        "stage_input": args.stage_input,
+    # Validation intelligente :
+    # - Cas A : l'utilisateur a fourni les chemins CSV (tracked_input & stage_input) -> c'est suffisant
+    # - Cas B : si un ou plusieurs CSV manquent, on autorise la récupération via l'API DHIS2,
+    #          auquel cas base_url + token + program sont obligatoires
+
+    csvs_provided = bool(args.tracked_input) and bool(args.stage_input)
+    if csvs_provided:
+        return
+
+    # Si on arrive ici, au moins un CSV est manquant -> vérifier qu'on peut télécharger
+    required_for_download = {
         "base_url": args.base_url,
         "token": args.token,
         "program": args.program,
     }
-    missing = [name for name, value in required.items() if not value]
+    missing = [name for name, value in required_for_download.items() if not value]
     if missing:
-        parser.error("Paramètres manquants : " + ", ".join(missing))
+        parser.error(
+            "Paramètres manquants : soit fournissez --tracked-input et --stage-input, "
+            "soit fournissez --base-url, --token et --program pour permettre le téléchargement"
+        )
 
 # ==========================================================
 # ======================= ÉTAT =============================
@@ -122,6 +133,127 @@ def get_stage_dataelements(base_url: str, token: str, stage_id: str) -> list[str
     data = safe_get(url, token, params)
     elements = sorted(data.get("programStageDataElements", []), key=lambda x: x.get("sortOrder", math.inf))
     return [e["dataElement"]["displayName"] for e in elements if e.get("dataElement")]
+
+# ==========================================================
+# ================== LOGICHE DE TELECHARGEMENT ==============
+# ==========================================================
+
+def build_url(base_url: str, params: dict) -> str:
+    """Reconstruit une URL en ajoutant la query string si besoin.
+
+    Cette version est utilisée pour les téléchargements CSV (tracked/entity/events).
+    """
+    from urllib.parse import urlencode
+    query_string = urlencode(params)
+    return f"{base_url}?{query_string}" if query_string else base_url
+
+
+def download_stream_to_file(full_url: str, output_file: str, token: str):
+    """Télécharge une ressource HTTP en streaming vers un fichier local.
+
+    On utilise un header ApiToken et on affiche une barre de progression (tqdm).
+    """
+    headers = {"Authorization": f"ApiToken {token}"}
+    print(f"URL générée pour téléchargement : {full_url}")
+    try:
+        with requests.get(full_url, headers=headers, stream=True, timeout=60) as response:
+            response.raise_for_status()
+            total_size = int(response.headers.get("content-length", 0))
+            from tqdm import tqdm
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file, "wb") as f, tqdm(
+                total=total_size,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc="Téléchargement",
+            ) as bar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        bar.update(len(chunk))
+        print(f"✅ Fichier téléchargé : {output_file}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erreur lors du téléchargement : {e}")
+        raise
+
+
+def download_dhis2_tracked_if_missing(tracked_path: str, base_url: str, token: str, program: str):
+    """Télécharge `trackedEntityInstances.csv` si le fichier local est absent.
+
+    - Construit l'endpoint en partant de `base_url` (ajoute `/trackedEntityInstances.csv` si nécessaire)
+    - Utilise quelques paramètres utiles (program, dates) lus depuis les variables d'environnement
+    - Cette fonction ne modifie pas les scripts originaux `download_tracked.py` ou `download.py`,
+      elle reprend simplement leur logique ici pour l'intégration.
+    """
+    if os.path.exists(tracked_path):
+        print(f"ℹ️ Fichier tracked déjà présent : {tracked_path}")
+        return
+
+    if not token:
+        raise RuntimeError("Token manquant : impossible de télécharger les trackedEntityInstances")
+
+    # Déterminer URL de base pour tracked (si base_url ne contient pas .csv)
+    if base_url.endswith(".csv"):
+        tracked_base = base_url
+    else:
+        tracked_base = base_url.rstrip("/") + "/trackedEntityInstances.csv"
+
+    # Paramètres communs : on prend ce qui est disponible dans l'environnement
+    params = {}
+    if program:
+        params["program"] = program
+    # dates possibles
+    start = os.getenv("DOWNLOAD_START_DATE") or os.getenv("TRACKED_PROGRAM_START_DATE")
+    end = os.getenv("DOWNLOAD_END_DATE") or os.getenv("TRACKED_PROGRAM_END_DATE")
+    if start:
+        params["programStartDate"] = start
+    if end:
+        params["programEndDate"] = end
+
+    full_url = build_url(tracked_base, params)
+    download_stream_to_file(full_url, tracked_path, token)
+
+
+def download_dhis2_events_if_missing(events_path: str, base_url: str, token: str, program: str):
+    """Télécharge `events.csv` (export events) si le fichier local est absent.
+
+    Construit l'endpoint `/events.csv` et utilise des paramètres courants (orgUnit, program, dates...).
+    """
+    if os.path.exists(events_path):
+        print(f"ℹ️ Fichier events déjà présent : {events_path}")
+        return
+
+    if not token:
+        raise RuntimeError("Token manquant : impossible de télécharger les events")
+
+    if base_url.endswith(".csv"):
+        events_base = base_url
+    else:
+        events_base = base_url.rstrip("/") + "/events.csv"
+
+    params = {}
+    # paramètres recherchés dans .env
+    org = os.getenv("DOWNLOAD_ORG_UNIT")
+    if org:
+        params["orgUnit"] = org
+    if program:
+        params["program"] = program
+    stage = os.getenv("DOWNLOAD_PROGRAM_STAGE")
+    if stage:
+        params["programStage"] = stage
+    start = os.getenv("DOWNLOAD_START_DATE")
+    end = os.getenv("DOWNLOAD_END_DATE")
+    if start:
+        params["startDate"] = start
+    if end:
+        params["endDate"] = end
+    # quelques options utiles par défaut
+    params.setdefault("ouMode", os.getenv("DOWNLOAD_OU_MODE", "DESCENDANTS"))
+    params.setdefault("skipPaging", os.getenv("DOWNLOAD_SKIP_PAGING", "true"))
+
+    full_url = build_url(events_base, params)
+    download_stream_to_file(full_url, events_path, token)
 
 # ==========================================================
 # ===================== MAPPING =============================
@@ -202,6 +334,29 @@ def main():
 
     # Chargement de l’état
     state = load_state(args.state_file)
+
+    # ------------------------------------------------------------------
+    # Avant de lancer les pivots, s'assurer que les fichiers CSV d'entrée existent.
+    # - Si `--tracked-input` ou `--stage-input` ne pointe pas vers un fichier existant,
+    #   on tente un téléchargement automatique via l'API DHIS2 en réutilisant la logique
+    #   présente dans `download_tracked.py` et `download.py` (intégrée ci-dessus).
+    # - Les téléchargements utilisent les variables d'environnement complémentaires
+    #   si elles existent (dates, orgUnit, programStage, etc.).
+    # ------------------------------------------------------------------
+
+    # Défauts locaux si aucun chemin n'est fourni
+    if not args.tracked_input:
+        args.tracked_input = os.getenv("TRACKED_OUTPUT", "data/trackedEntityInstances.csv")
+    if not args.stage_input:
+        args.stage_input = os.getenv("PIVOT_INPUT", "data/data.csv")
+
+    # Tenter de télécharger les fichiers manquants
+    try:
+        download_dhis2_tracked_if_missing(args.tracked_input, args.base_url, args.token, args.program)
+        download_dhis2_events_if_missing(args.stage_input, args.base_url, args.token, args.program)
+    except Exception as e:
+        print(f"Erreur lors du téléchargement automatique des fichiers d'entrée : {e}")
+        # On continue et on laissera pandas lever l'erreur si les fichiers sont vraiment introuvables
 
     # Pivot du premier onglet
     tracked_df = pivot_tracked_df(args.tracked_input, args.aggfunc)
