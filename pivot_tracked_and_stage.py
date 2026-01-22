@@ -337,6 +337,16 @@ def run_pivot_and_excel(
             sheet_df = pivot.reindex(columns=cols, fill_value="").copy()
             sheet_df = sheet_df.fillna("")
 
+            # Détecter si toutes les colonnes de dataElement sont vides pour tous les enrollments
+            data_columns = [c for c in cols if c not in ("enrollment", "ID")]
+            non_empty = False
+            if data_columns:
+                # any non-empty cell across the data columns?
+                non_empty = sheet_df[data_columns].apply(lambda col: col.astype(str).str.strip().ne("")).any().any()
+
+            if not non_empty:
+                print("⚠️ Feuille vide : toutes les valeurs sont vides")
+
             # Écrire la feuille (même si toutes les colonnes de dataElement sont vides)
             sheet_df.to_excel(writer, sheet_name=stage_name, index=False)
             auto_adjust_column_width(writer.sheets[stage_name])
