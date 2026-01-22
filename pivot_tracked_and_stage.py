@@ -428,7 +428,7 @@ def run_pivot_and_excel(
     aggfunc: str,
     mapping_file: str,
     state_file: str,
-    strict: bool,
+    strict: bool = False,
 ):
     """
     Exécute TOUTE la logique existante de pivot et génération Excel.
@@ -649,6 +649,7 @@ def main():
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--only-download", action="store_true")
     parser.add_argument("--only-pivot", action="store_true")
+    parser.add_argument("--strict", action="store_true")
     parser.add_argument("--apply-mapping", action="store_true", help="Appliquer le mapping (data/correspondance.csv & data/structure.xlsx) sur l'Excel généré")
     parser.add_argument("--mapping-correspondance", default="data/correspondance.csv", help="Chemin vers le fichier de correspondance (csv/xlsx)")
     parser.add_argument("--mapping-structure", default="data/structure.xlsx", help="Chemin vers le fichier structure (csv/xlsx)")
@@ -733,7 +734,7 @@ def main():
             aggfunc=os.getenv("PIVOT_AGGFUNC", "first"),
             mapping_file=os.getenv("PIVOT_MAPPING_FILE"),
             state_file=os.getenv("PIVOT_STATE_FILE"),
-            strict=False,
+            strict=args.strict,
         )
 
         # Optionnel : appliquer le mapping sur l'Excel généré
