@@ -198,7 +198,7 @@ def build_de_mapping_from_api(base_url: str, token: str) -> dict:
     return {de["id"]: de["displayName"] for de in data.get("dataElements", [])}
 
 # ==========================================================
-# ================= MAP VALUES (from map_values.py) ========
+# ======================= MAP VALUES  ======================
 # ==========================================================
 def charger_fichier(path: str) -> pd.DataFrame:
     """Charge un fichier .csv ou .xlsx en DataFrame (dtype=str).
@@ -463,7 +463,7 @@ def run_pivot_and_excel(
     # ======================
     # Écriture premier onglet
     # ======================
-    if os.path.exists(output) and not os.path.exists(state_file):
+    if os.path.exists(output) and os.path.exists(state_file):
         wb = load_workbook(output)
         if "TrackedEntities" not in wb.sheetnames:
             writer = pd.ExcelWriter(output, engine="openpyxl", mode="a", if_sheet_exists="overlay")
@@ -555,7 +555,7 @@ def run_pivot_and_excel(
             elements = get_stage_dataelements(base_url, token, stage["id"])  # list[str]
 
             # Construire les colonnes du sheet dans l'ordre exact donné par le ProgramStage
-            cols = ["enrollment", "ID"] + elements
+            cols = ["enrollment", "ID", "createdDate"] + elements
 
             # Reindexer le pivot global pour garantir que toutes les colonnes présentes dans
             # la définition du stage sont écrites, dans l'ordre demandé. Les colonnes
@@ -566,7 +566,7 @@ def run_pivot_and_excel(
             sheet_df = sheet_df.fillna("")
 
             # Détecter si toutes les colonnes de dataElement sont vides pour tous les enrollments
-            data_columns = [c for c in cols if c not in ("enrollment", "ID")]
+            data_columns = [c for c in cols if c not in ("enrollment", "ID", "createdDate")]
             non_empty = False
             if data_columns:
                 # any non-empty cell across the data columns?
@@ -577,7 +577,6 @@ def run_pivot_and_excel(
 
             # Écrire la feuille (même si toutes les colonnes de dataElement sont vides)
             sheet_df.to_excel(writer, sheet_name=stage_name, index=False)
-            auto_adjust_column_width(writer.sheets[stage_name])
 
             state["completed_stages"].append(stage_name)
             save_state(state_file, state)
@@ -587,6 +586,7 @@ def run_pivot_and_excel(
     finally:
         writer.close()
 
+    adjust_excel_after_mapping(output)
     clear_state(state_file)
     print("\n🎉 Fichier Excel généré avec succès")
 
@@ -594,14 +594,14 @@ def run_pivot_and_excel(
 # ===================== EXCEL UTIL =========================
 # ==========================================================
 
-def auto_adjust_column_width(ws):
-    for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            value = str(cell.value) if cell.value else ""
-            max_length = max(max_length, len(value))
-        ws.column_dimensions[column].width = max_length + 2
+def auto_adjust_column_width(ws, df):
+    for i, col in enumerate(df.columns, start=1):
+        max_len = max(
+            [len(str(col))] +
+            [len(str(v)) for v in df[col].astype(str)]
+        )
+        ws.column_dimensions[get_column_letter(i)].width = max_len + 2
+
 
 def write_with_progress(df: pd.DataFrame, writer, sheet_name: str, chunk_size: int = 50):
     total = len(df)
@@ -619,8 +619,24 @@ def write_with_progress(df: pd.DataFrame, writer, sheet_name: str, chunk_size: i
         sys.stdout.write(f"\r   → Lignes {start+1} à {end} / {total} ({progress:.1f}%)")
         sys.stdout.flush()
 
-    auto_adjust_column_width(ws)
+    auto_adjust_column_width(ws, df.head(0))
     print(f"\n✅ Onglet '{sheet_name}' écrit avec succès\n")
+
+def adjust_excel_after_mapping(excel_path: str):
+    wb = load_workbook(excel_path)
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+
+        data = ws.values
+        headers = next(data, None)
+        if not headers:
+            continue
+
+        df = pd.DataFrame(data, columns=headers)
+        auto_adjust_column_width(ws, df)
+
+    wb.save(excel_path)
 
 # ==========================================================
 # ========================= MAIN ============================
@@ -723,13 +739,13 @@ def main():
         # Optionnel : appliquer le mapping sur l'Excel généré
         if args.apply_mapping:
             excel_file = os.getenv("MERGED_PIVOT_OUTPUT")
-            mapping_corr = args.mapping_correspondance
-            mapping_struct = args.mapping_structure
+            
             if excel_file and os.path.exists(excel_file):
                 print(f"\n🧭 Application du mapping sur {excel_file}")
+                
                 apply_mapping_to_excel(
-                    correspondance_path=mapping_corr,
-                    structure_path=mapping_struct,
+                    correspondance_path=args.mapping_correspondance,
+                    structure_path=args.mapping_structure,
                     excel_path=excel_file,
                     col_a1=args.mapping_col_a1,
                     col_a2=args.mapping_col_a2,
@@ -738,10 +754,14 @@ def main():
                     log_file=args.mapping_log_file,
                     preview=args.mapping_preview,
                 )
+                
+                print("📐 Ajustement des largeurs après mapping")
+                adjust_excel_after_mapping(excel_file)
+
             else:
                 print(f"⚠️ Fichier Excel introuvable pour mapping: {excel_file}")
     else:
-        print("⏩ Pivot ignoré")
+        print("\n⏩ Pivot ignoré")
 
     print("\n✅ Pipeline terminé")
 
