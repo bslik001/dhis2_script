@@ -23,7 +23,9 @@ Voici les modifications apportées récemment au dépôt (à prendre en compte l
 - Ajout de `/.env.example` : modèle commenté contenant des placeholders pour toutes les variables de configuration. Copier ce fichier en `.env` et remplir localement (ne pas committer).
 - Ajout de `/.gitignore` : ignore désormais `.env`, `output/`, `data/*.csv` et autres fichiers temporaires/IDE.
 - Intégration des étapes de téléchargement directement dans `pivot_tracked_and_stage.py` : la logique de `download_tracked.py` et `download.py` a été fusionnée pour permettre au script de récupérer automatiquement les CSV si nécessaire.
-- Nouvelles options CLI pour contrôler le téléchargement : `--no-download`, `--download-only`, et `--force-download`.
+ - Intégration des étapes de téléchargement directement dans `pivot_tracked_and_stage.py` : la logique de `download_tracked.py` et `download.py` a été fusionnée pour permettre au script de récupérer automatiquement les CSV si nécessaire.
+ - Nouvelles options CLI pour contrôler le téléchargement : `--skip-download`, `--only-download`, et `--only-pivot`.
+ - Nouveau flag CLI `--apply-mapping` : applique les correspondances (par défaut `data/correspondance.csv` et `data/structure.xlsx`) sur CHAQUE onglet de l'Excel final généré. Options associées : `--mapping-correspondance`, `--mapping-structure`, `--mapping-col-a1`, `--mapping-col-a2`, `--mapping-col-b1`, `--mapping-col-b2`, `--mapping-log-file`, `--mapping-preview`.
 - Ajout de vérifications préalables et messages d'erreur plus clairs pour les cas où les fichiers d'entrée sont manquants (évite les `FileNotFoundError` non expliquées).
 - Mise à jour de la documentation et masquage des tokens sensibles dans le README ; recommandations de sécurité ajoutées (révoquer les tokens exposés, utiliser `.env.example`).
 
@@ -353,6 +355,16 @@ python3 pivot_tracked_and_stage.py --skip-download
 python3 pivot_tracked_and_stage.py --only-pivot
 ```
 
+Options de mapping (nouveau) :
+
+- `--apply-mapping` : après génération de l'Excel (`MERGED_PIVOT_OUTPUT`), applique les correspondances trouvées dans les fichiers de correspondance/structure à CHAQUE onglet de l'Excel. Utile pour convertir des libellés/textes en codes selon une table de correspondance.
+- `--mapping-correspondance` : chemin vers le fichier de correspondance (par défaut `data/correspondance.csv`). Peut être `.csv` ou `.xlsx`.
+- `--mapping-structure` : chemin vers le fichier de structure (par défaut `data/structure.xlsx`). Peut être `.csv` ou `.xlsx`.
+- `--mapping-col-a1`, `--mapping-col-a2` : noms des colonnes dans le fichier de correspondance (par défaut `Option Codes` et `Option Details`).
+- `--mapping-col-b1`, `--mapping-col-b2` : noms des colonnes dans le fichier de structure (par défaut `Option Codes` et `DataElement`). `--mapping-col-b2` indique la colonne cible (nom de la colonne à remplacer dans les onglets Excel).
+- `--mapping-log-file` : fichier de log optionnel qui recevra la liste des remplacements appliqués.
+- `--mapping-preview` : affiche un aperçu (quelques lignes) des onglets modifiés après application du mapping.
+
 Exemple : définir une variable d'environnement temporairement et lancer le téléchargement
 
 ```bash
@@ -422,6 +434,19 @@ python pivot_tracked_and_stage.py --aggfunc last
 ```
 
 **Résultat** : Utilise la dernière valeur en cas de doublons (au lieu de la première).
+
+### Exemple 5 : Appliquer le mapping automatiquement après génération
+
+```bash
+# Génère l'Excel puis applique les mappings par défaut (data/correspondance.csv & data/structure.xlsx)
+python3 pivot_tracked_and_stage.py --apply-mapping
+
+# Spécifier des fichiers personnalisés et écrire un log
+python3 pivot_tracked_and_stage.py --apply-mapping \
+   --mapping-correspondance custom/corresp.csv \
+   --mapping-structure custom/structure.xlsx \
+   --mapping-log-file mapping_changes.txt --mapping-preview
+```
 
 ---
 
