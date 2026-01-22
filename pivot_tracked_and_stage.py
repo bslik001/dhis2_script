@@ -379,7 +379,9 @@ def apply_mapping_to_excel(correspondance_path: str,
 # ==========================================================
 
 def pivot_tracked_df(input_file: str, aggfunc: str) -> pd.DataFrame:
-    df = pd.read_csv(input_file, dtype=str)
+    # Lire le CSV brut pour récupérer potentiellement la colonne 'created' associée
+    raw = pd.read_csv(input_file, dtype=str)
+    df = raw.copy()
     pivot = df.pivot_table(
         index="trackedEntityInstance",
         columns="displayName",
@@ -390,6 +392,29 @@ def pivot_tracked_df(input_file: str, aggfunc: str) -> pd.DataFrame:
         pivot.columns.get_loc("trackedEntityInstance") + 1,
         "ID",
         range(1, len(pivot) + 1)
+    )
+    # Trouver une colonne 'created' dans le raw (insensible à la casse)
+    created_col = None
+    for cand in ("created", "createdDate", "createddate", "created_at"):
+        for c in raw.columns:
+            if c.lower() == cand.lower():
+                created_col = c
+                break
+        if created_col:
+            break
+
+    # Construire une map trackedEntityInstance -> created
+    if created_col and created_col in raw.columns:
+        created_map = raw.groupby("trackedEntityInstance")[created_col].first().to_dict()
+    else:
+        created_map = {}
+
+    # Insérer la colonne createdDate juste après ID
+    created_values = [created_map.get(te, "") for te in pivot["trackedEntityInstance"]]
+    pivot.insert(
+        pivot.columns.get_loc("ID") + 1,
+        "createdDate",
+        created_values
     )
     return pivot
 
@@ -427,9 +452,9 @@ def run_pivot_and_excel(
     parent_cols = [c for c in cols if "_parent_consent" in str(c).lower()]
 
     if strict:
-        ordered_cols = ["trackedEntityInstance"] + serial_cols + ["ID"] + date_cols + parent_cols
+        ordered_cols = ["trackedEntityInstance"] + serial_cols + ["ID", "createdDate"] + date_cols + parent_cols
     else:
-        ordered_cols = ["trackedEntityInstance"] + serial_cols + ["ID"]
+        ordered_cols = ["trackedEntityInstance"] + serial_cols + ["ID", "createdDate"]
         remaining = [c for c in cols if c not in ordered_cols]
         ordered_cols += sorted(remaining)
 
@@ -475,7 +500,10 @@ def run_pivot_and_excel(
     # ======================
     # Pivot global events
     # ======================
-    pivot = df.pivot_table(
+    # Garder le dataframe raw pour extraire la dueDate par enrollment
+    raw_events = df
+
+    pivot = raw_events.pivot_table(
         index="enrollment",
         columns="dataElement",
         values="value",
@@ -486,6 +514,28 @@ def run_pivot_and_excel(
         pivot.columns.get_loc("enrollment") + 1,
         "ID",
         range(1, len(pivot) + 1)
+    )
+
+    # Extraire dueDate (ou équivalent) depuis raw_events pour chaque enrollment
+    due_col = None
+    for cand in ("dueDate", "due_date", "duedate", "eventDate", "event_date"):
+        for c in raw_events.columns:
+            if c.lower() == cand.lower():
+                due_col = c
+                break
+        if due_col:
+            break
+
+    if due_col and due_col in raw_events.columns:
+        due_map = raw_events.groupby("enrollment")[due_col].first().to_dict()
+    else:
+        due_map = {}
+
+    created_values = [due_map.get(enr, "") for enr in pivot["enrollment"]]
+    pivot.insert(
+        pivot.columns.get_loc("ID") + 1,
+        "createdDate",
+        created_values
     )
 
     stages = get_program_stages(base_url, token, program)
