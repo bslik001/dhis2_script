@@ -118,7 +118,7 @@ Avant de commencer, vous aurez besoin de :
 2. **Installer les dépendances**
    - Dans la fenêtre qui s'ouvre, tapez cette commande et appuyez sur **Entrée** :
      ```bash
-     pip install pandas openpyxl requests python-dotenv
+      python3 -m pip install -r requirements.txt
      ```
    - Attendez quelques minutes (le téléchargement et l'installation peuvent prendre 2-5 minutes)
    - Vous devriez voir plusieurs lignes défiler avec "Successfully installed..."
@@ -469,11 +469,7 @@ python3 pivot_tracked_and_stage.py --apply-mapping \
 
 **Solution** :
 ```bash
-# Windows
-pip install pandas openpyxl requests python-dotenv
-
-# Mac/Linux
-pip3 install pandas openpyxl requests python-dotenv
+python3 -m pip install -r requirements.txt
 ```
 
 ### Problème 3 : "FileNotFoundError: [Errno 2] No such file or directory: 'trackedEntityInstances.csv'"
@@ -704,6 +700,12 @@ Le fichier Excel contient plusieurs onglets :
 - **openpyxl** (≥3.0.0) : Lecture/écriture de fichiers Excel
 - **requests** (≥2.25.0) : Communication avec l'API DHIS2
 - **python-dotenv** (≥0.19.0) : Chargement des variables d'environnement depuis `.env`
+- **tqdm** (≥4.60.0) : Barre de progression pour les téléchargements
+
+Optionnel :
+- **xlrd** (≥2.0.1) : nécessaire uniquement si vous devez lire d'anciens fichiers `.xls` avec pandas
+
+Remarque sur Python : le code utilise des annotations modernes; la version minimale recommandée est **Python 3.9+**. Si vous préférez rester sur Python 3.8, dites-le et je rétroporterai les annotations pour compatibilité.
 
 ### Compatibilité :
 
@@ -722,7 +724,7 @@ Vous êtes maintenant prêt à utiliser le script `pivot_tracked_and_stage.py` !
 ```bash
 # 1. Installez Python
 # 2. Installez les dépendances
-pip install pandas openpyxl requests python-dotenv
+python3 -m pip install -r requirements.txt
 
 # 3. Configurez le fichier .env
 # 4. Placez vos fichiers CSV dans le dossier
